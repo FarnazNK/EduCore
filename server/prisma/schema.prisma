@@ -1,0 +1,324 @@
+// server/prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  STUDENT
+  INSTRUCTOR
+  ADMIN
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  COMPLETED
+  DROPPED
+  PENDING
+}
+
+enum CourseStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum AssignmentStatus {
+  PENDING
+  SUBMITTED
+  GRADED
+  LATE
+}
+
+model User {
+  id                String        @id @default(uuid())
+  email             String        @unique
+  password          String
+  firstName         String
+  lastName          String
+  role              UserRole      @default(STUDENT)
+  avatar            String?
+  bio               String?
+  verified          Boolean       @default(false)
+  active            Boolean       @default(true)
+  lastLogin         DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  // Relations
+  enrollments       Enrollment[]
+  coursesCreated    Course[]      @relation("CourseInstructor")
+  submissions       Submission[]
+  comments          Comment[]
+  notifications     Notification[]
+  achievements      UserAchievement[]
+  activities        Activity[]
+
+  @@index([email])
+  @@index([role])
+}
+
+model Course {
+  id                String        @id @default(uuid())
+  title             String
+  slug              String        @unique
+  description       String
+  thumbnail         String?
+  category          String
+  level             String        // Beginner, Intermediate, Advanced
+  language          String        @default("en")
+  price             Float         @default(0)
+  status            CourseStatus  @default(DRAFT)
+  publishedAt       DateTime?
+  instructorId      String
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  // Relations
+  instructor        User          @relation("CourseInstructor", fields: [instructorId], references: [id])
+  modules           Module[]
+  enrollments       Enrollment[]
+  reviews           Review[]
+  prerequisites     CoursePrerequisite[] @relation("Course")
+  requiredFor       CoursePrerequisite[] @relation("Prerequisite")
+
+  @@index([instructorId])
+  @@index([slug])
+  @@index([status])
+  @@index([category])
+}
+
+model Module {
+  id                String        @id @default(uuid())
+  title             String
+  description       String?
+  order             Int
+  courseId          String
+  published         Boolean       @default(false)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  // Relations
+  course            Course        @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lessons           Lesson[]
+
+  @@index([courseId])
+  @@index([order])
+}
+
+model Lesson {
+  id                String        @id @default(uuid())
+  title             String
+  content           String        // Rich text/HTML content
+  videoUrl          String?
+  duration          Int?          // Duration in seconds
+  order             Int
+  moduleId          String
+  published         Boolean       @default(false)
+  resources         Json?         // Array of downloadable resources
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  // Relations
+  module            Module        @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  assignments       Assignment[]
+  progress          Progress[]
+  comments          Comment[]
+
+  @@index([moduleId])
+  @@index([order])
+}
+
+model Assignment {
+  id                String        @id @default(uuid())
+  title             String
+  description       String
+  lessonId          String
+  maxScore          Int           @default(100)
+  dueDate           DateTime?
+  allowLateSubmission Boolean     @default(false)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  // Relations
+  lesson            Lesson        @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  submissions       Submission[]
+
+  @@index([lessonId])
+}
+
+model Submission {
+  id                String            @id @default(uuid())
+  assignmentId      String
+  userId            String
+  content           String
+  attachments       Json?             // Array of file URLs
+  score             Int?
+  feedback          String?
+  status            AssignmentStatus  @default(PENDING)
+  submittedAt       DateTime          @default(now())
+  gradedAt          DateTime?
+
+  // Relations
+  assignment        Assignment        @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  user              User              @relation(fields: [userId], references: [id])
+
+  @@index([assignmentId])
+  @@index([userId])
+  @@index([status])
+}
+
+model Enrollment {
+  id                String            @id @default(uuid())
+  userId            String
+  courseId          String
+  status            EnrollmentStatus  @default(ACTIVE)
+  progress          Int               @default(0) // Percentage
+  completedAt       DateTime?
+  enrolledAt        DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  // Relations
+  user              User              @relation(fields: [userId], references: [id])
+  course            Course            @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, courseId])
+  @@index([userId])
+  @@index([courseId])
+  @@index([status])
+}
+
+model Progress {
+  id                String        @id @default(uuid())
+  userId            String
+  lessonId          String
+  completed         Boolean       @default(false)
+  watchTime         Int           @default(0) // Seconds watched
+  completedAt       DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  // Relations
+  lesson            Lesson        @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, lessonId])
+  @@index([userId])
+  @@index([lessonId])
+}
+
+model Review {
+  id                String        @id @default(uuid())
+  courseId          String
+  userId            String
+  rating            Int           // 1-5
+  comment           String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  // Relations
+  course            Course        @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, courseId])
+  @@index([courseId])
+  @@index([rating])
+}
+
+model Comment {
+  id                String        @id @default(uuid())
+  content           String
+  lessonId          String
+  userId            String
+  parentId          String?       // For nested comments
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  // Relations
+  lesson            Lesson        @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  user              User          @relation(fields: [userId], references: [id])
+  parent            Comment?      @relation("CommentReplies", fields: [parentId], references: [id])
+  replies           Comment[]     @relation("CommentReplies")
+
+  @@index([lessonId])
+  @@index([userId])
+  @@index([parentId])
+}
+
+model Notification {
+  id                String        @id @default(uuid())
+  userId            String
+  title             String
+  message           String
+  type              String        // ENROLLMENT, ASSIGNMENT, COMMENT, etc.
+  read              Boolean       @default(false)
+  link              String?
+  createdAt         DateTime      @default(now())
+
+  // Relations
+  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([read])
+  @@index([createdAt])
+}
+
+model Achievement {
+  id                String        @id @default(uuid())
+  name              String        @unique
+  description       String
+  icon              String
+  criteria          Json          // Conditions to earn this achievement
+  points            Int           @default(0)
+  createdAt         DateTime      @default(now())
+
+  // Relations
+  userAchievements  UserAchievement[]
+}
+
+model UserAchievement {
+  id                String        @id @default(uuid())
+  userId            String
+  achievementId     String
+  earnedAt          DateTime      @default(now())
+
+  // Relations
+  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement       Achievement   @relation(fields: [achievementId], references: [id])
+
+  @@unique([userId, achievementId])
+  @@index([userId])
+  @@index([achievementId])
+}
+
+model Activity {
+  id                String        @id @default(uuid())
+  userId            String
+  type              String        // LOGIN, COURSE_COMPLETE, LESSON_COMPLETE, etc.
+  metadata          Json?
+  createdAt         DateTime      @default(now())
+
+  // Relations
+  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+model CoursePrerequisite {
+  id                String        @id @default(uuid())
+  courseId          String
+  prerequisiteId    String
+
+  // Relations
+  course            Course        @relation("Course", fields: [courseId], references: [id], onDelete: Cascade)
+  prerequisite      Course        @relation("Prerequisite", fields: [prerequisiteId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, prerequisiteId])
+  @@index([courseId])
+  @@index([prerequisiteId])
+}
